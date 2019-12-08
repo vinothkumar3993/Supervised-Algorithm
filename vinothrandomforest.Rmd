@@ -1,0 +1,145 @@
+---
+title : "SANTANDER CUSTOMER SATISFACTION"
+author: "VINOTHKUMAR A"
+date  : "03 NOV 2018"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+#include library
+```{r}
+library(ggplot2) # Data visualization
+library(readr) # CSV file I/O, e.g. the read_csv function
+```
+# Santander Customer Satisfaction
+# Comparison of unbalanced and downscaled Random Forests
+```{r}
+library(dplyr)
+library(caret) 
+library(randomForest)
+```
+# Read data
+```{r}
+train0 <- read.csv("D:/santander/train.csv") 
+test0 <- read.csv("D:/santander/train.csv")
+```
+# First combine all the data for cleaning
+```{r}
+all_data <- rbind(train0,test0)
+```
+# Find predictors that have very low percentage of unique values
+# zeroVar: gives vector of logicals for whether the predictor has only one disticnt value
+# nzv : gives vector of logicals for whether the predictor is a near zero variance predictor
+```{r} 
+nsv <- nearZeroVar(all_data[,-1], 
+                   saveMetrics = TRUE) # Do not test ID
+```
+
+# Subset, remove near zero variance predictors 
+# Note: Here we could have chosen zeroVar, which would lead to a larger set of predictors
+```{r}
+all_data.new <- all_data[, !nsv$nzv]
+```
+#Visualization
+```{r}
+library(lattice)
+splom(train0[,3:5]) #only for integer values
+
+```
+#correlation plot #to find the amount of correlation between variables
+```{r}
+library(corrplot)
+cr <- cor(train0[,5:7])
+corrplot(cr, method = "number")
+
+```
+
+# Find duplicate columns and then remove them
+```{r}
+dpl.cl <- data.frame(i = integer(), j = integer())
+for (i in 2:(ncol(all_data.new)-1) ){
+  for 
+  (j in (i+1):ncol(all_data.new) ){
+    
+    if (identical(all_data.new[,i], all_data.new[,j]) == TRUE){
+      dpl.cl <- rbind(dpl.cl, data.frame(i = i, j=j))
+      #print(c(i,j))
+      
+    }
+  }
+}
+all_data.new <- all_data.new[, -dpl.cl$j]
+
+```
+
+# Now split back into training and testing sets
+```{r}
+train1 <- all_data.new[1:nrow(train0), ]; train1$TARGET <- train0$TARGET
+test1 <- all_data.new[(nrow(train0) + 1):nrow(all_data.new), ]
+rm(train0,test0) # Remove unnecessary data.frames
+```
+# Turn TARGET into factor (0 and 1)
+```{r}
+train1 <- mutate(train1, TARGET = factor(TARGET))
+nmin = sum(train1$TARGET == "1") #skewed class is 1
+nmax = sum(train1$TARGET == "0")
+c(nmin, nmax) # Much more 1's than 0's
+```
+
+# Create training and test data from train1
+```{r}
+set.seed(101)
+inTrain <- createDataPartition(y = train1$TARGET, p = 0.7, list = FALSE)
+training <- train1[inTrain, ]; testing <- train1[-inTrain, ]
+```
+
+# Let us try to train a simple Random Forest using down-sampling
+```{r}
+nmin = sum(training$TARGET == "1")
+```
+
+## Tell randomForest to sample by strata. 
+## Specify that the number of samples selected within each class should be the same
+```{r}
+rf0 <- randomForest(TARGET ~., data = training, ntree = 500, mtry = 10,
+                    strata = training$TARGET, sampsize = rep(nmin,2))
+pred.rf0 <- predict(rf0, newdata = testing)
+cm0 <- confusionMatrix(pred.rf0, testing$TARGET)
+
+```
+# Let's look at the unbalanced RF
+```{r}
+rfu <- randomForest(TARGET ~. , data = training, ntree = 500, mtry = 10)
+pred.rfu <- predict(rfu, newdata = testing)
+cmu <- confusionMatrix(pred.rfu, testing$TARGET)
+```
+# Compare the confusion matrices cmu and cm0, you will see the difference
+# Let's look at the ROC curves
+```{r}
+library(pROC)
+pred.rf0 <- predict(rf0, newdata = testing, type = "prob")[,1]
+pred.rfu <- predict(rfu, newdata = testing, type = "prob")[,1]
+downsampledROC <- roc(response = testing$TARGET, predictor = pred.rf0,
+                      levels = rev(levels(testing$TARGET)))
+unbalancedROC <- roc(response = testing$TARGET, predictor = pred.rfu,
+                     levels = rev(levels(testing$TARGET)))
+plot(downsampledROC, col = rgb(1, 0, 0, .5), lwd = 2); 
+plot(unbalancedROC, col = rgb(0, 0, 1, .5), lwd = 2, add = TRUE)
+```
+# Area under the ROC curves
+```{r}
+auc(downsampledROC)
+auc(unbalancedROC)
+```
+
+```{r}
+submission <-data.frame(Id = test1$id,TARGET=pred.rf0)
+write.csv(submission,"D:santander/submit3.csv",row.names=F)
+```
+
+# kaggle score is 0.500000 using RandomForset
+
+
+
